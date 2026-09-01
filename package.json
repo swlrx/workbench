@@ -4,8 +4,7 @@
   "description": "工作台 Workbench - 多标签内网客户端",
   "main": "main.js",
   "author": "swlrx",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dist:win": "electron-builder --win nsis --x64"
