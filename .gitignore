@@ -1,0 +1,21 @@
+node_modules/
+release/
+temp/
+build/
+
+*.log
+*.bak
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Electron user data and local state
+settings.json
+tabs.json
+window-state.json
+.migrated-from-hermes

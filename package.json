@@ -1,0 +1,55 @@
+{
+  "name": "workbench",
+  "version": "3.5.22",
+  "description": "工作台 Workbench - 多标签内网客户端",
+  "main": "main.js",
+  "author": "swlrx",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^36.9.5",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.workbench.app",
+    "productName": "workbench",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer-injections.js",
+      "tabbar.html",
+      "settings.html",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/hermes.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "工作台",
+      "installerIcon": "hermes.ico",
+      "uninstallerIcon": "hermes.ico",
+      "artifactName": "workbench-Setup-${version}-win-x64.exe"
+    }
+  }
+}
