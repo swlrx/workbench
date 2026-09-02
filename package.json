@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "3.5.25",
+  "version": "3.5.26",
   "description": "工作台 Workbench - 多标签内网客户端",
   "main": "main.js",
   "author": "swlrx",
@@ -16,6 +16,13 @@
   "build": {
     "appId": "com.workbench.app",
     "productName": "workbench",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "swlrx",
+        "repo": "workbench"
+      }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "assets"
@@ -48,7 +55,11 @@
       "shortcutName": "工作台",
       "installerIcon": "hermes.ico",
       "uninstallerIcon": "hermes.ico",
-      "artifactName": "workbench-Setup-${version}-win-x64.exe"
+      "artifactName": "workbench-Setup-${version}-win-x64.exe",
+      "deleteAppDataOnUninstall": false
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

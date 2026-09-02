@@ -1,6 +1,7 @@
 const { app, BrowserWindow, WebContentsView, dialog, Menu, Notification, screen, session, ipcMain, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
+const { autoUpdater } = require("electron-updater");
 const { injectNativeNotificationBridge } = require("./renderer-injections");
 
 // Add trusted self-signed certificate hosts here for private deployments.
@@ -21,6 +22,10 @@ let downloadHandlingReady = false;
 let sessionDataFlushed = false;
 let settingsWindow = null;
 let currentTheme = "dark";
+let updateCheckRunning = false;
+let updateDownloadRunning = false;
+let updateReadyToInstall = false;
+let updateCheckInteractive = false;
 
 const DEFAULT_URL_SHORTCUTS = ["F1", "F2", "F3", "F4"];
 const RESERVED_SHORTCUTS = new Map([
@@ -552,6 +557,7 @@ function setupApplicationMenu() {
       label: "帮助",
       submenu: [
         { label: `当前版本 ${app.getVersion()}`, enabled: false },
+        { label: updateReadyToInstall ? "安装已下载的更新" : "检查更新...", click: () => updateReadyToInstall ? autoUpdater.quitAndInstall(false, true) : checkForUpdates(true) },
         {
           label: "关于工作台",
           click: () => dialog.showMessageBox(mainWindow, {
@@ -567,6 +573,102 @@ function setupApplicationMenu() {
     }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function updateErrorMessage(error) {
+  return String(error?.message || error || "未知错误").slice(0, 1000);
+}
+
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("update-available", async info => {
+    updateCheckRunning = false;
+    updateCheckInteractive = false;
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "发现新版本",
+      message: `发现工作台 ${info.version}`,
+      detail: `当前版本：${app.getVersion()}\n最新版本：${info.version}\n\n是否立即下载更新？`,
+      buttons: ["下载更新", "稍后"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response !== 0 || updateDownloadRunning) return;
+    updateDownloadRunning = true;
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error) {
+      updateDownloadRunning = false;
+      dialog.showErrorBox("更新下载失败", updateErrorMessage(error));
+    }
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    updateCheckRunning = false;
+    const shouldNotify = updateCheckInteractive;
+    updateCheckInteractive = false;
+    if (shouldNotify && mainWindow && !mainWindow.isDestroyed()) dialog.showMessageBox(mainWindow, {
+      type: "info", title: "检查更新", message: "当前已是最新版本", buttons: ["确定"]
+    });
+  });
+
+  autoUpdater.on("download-progress", progress => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+    mainWindow.setProgressBar(percent / 100);
+  });
+
+  autoUpdater.on("update-downloaded", async info => {
+    updateDownloadRunning = false;
+    updateReadyToInstall = true;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    setupApplicationMenu();
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "更新已下载",
+      message: `工作台 ${info.version} 已下载完成`,
+      detail: "是否立即退出并安装更新？",
+      buttons: ["立即安装", "稍后"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (result.response === 0) autoUpdater.quitAndInstall(false, true);
+  });
+
+  autoUpdater.on("error", error => {
+    const wasActive = updateCheckRunning || updateDownloadRunning;
+    const shouldNotify = updateCheckInteractive || updateDownloadRunning;
+    updateCheckRunning = false;
+    updateDownloadRunning = false;
+    updateCheckInteractive = false;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    if (wasActive && shouldNotify) dialog.showErrorBox("检查更新失败", updateErrorMessage(error));
+  });
+}
+
+async function checkForUpdates(showNoUpdate = false) {
+  if (updateCheckRunning || updateDownloadRunning) return;
+  if (!app.isPackaged) {
+    if (showNoUpdate) dialog.showMessageBox(mainWindow, {
+      type: "info", title: "检查更新", message: "开发模式不执行自动更新", buttons: ["确定"]
+    });
+    return;
+  }
+  updateCheckRunning = true;
+  updateCheckInteractive = showNoUpdate;
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    if (!updateCheckRunning) return;
+    updateCheckRunning = false;
+    const shouldNotify = updateCheckInteractive;
+    updateCheckInteractive = false;
+    if (shouldNotify) dialog.showErrorBox("检查更新失败", updateErrorMessage(error));
+  }
 }
 
 function isAllowedMediaRequest(permission, details = {}) {
@@ -1161,8 +1263,10 @@ function createWindow() {
 app.whenReady().then(async () => {
   app.setName(appTitle);
   currentTheme = loadAppSettings().theme === "light" ? "light" : "dark";
+  setupAutoUpdater();
   setupApplicationMenu();
   createWindow();
+  setTimeout(() => checkForUpdates(false), 3000);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
