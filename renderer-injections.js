@@ -3,6 +3,19 @@ const NATIVE_NOTIFICATION_BRIDGE_SCRIPT = `
     const bridge = window.hermesDesktop;
     if (!bridge || typeof bridge.notifyCompletion !== "function") return false;
 
+    const nativeConfirm = window.confirm.bind(window);
+    const linkPromptPrefix = "Do you want to navigate to ";
+    const linkPromptSuffix = "?\\n\\nWARNING: This link could potentially be dangerous";
+    window.confirm = message => {
+      const text = String(message || "");
+      if (typeof bridge.openExternalLink === "function" && text.startsWith(linkPromptPrefix) && text.endsWith(linkPromptSuffix)) {
+        const url = text.slice(linkPromptPrefix.length, -linkPromptSuffix.length);
+        bridge.openExternalLink(url);
+        return false;
+      }
+      return nativeConfirm(message);
+    };
+
     const notify = (title, options = {}) => bridge.notifyCompletion({
       title: String(title || "hermes"),
       body: String(options.body || ""),

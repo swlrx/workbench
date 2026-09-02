@@ -787,6 +787,24 @@ ipcMain.handle("hermes:notify", (_event, payload) => {
   return showNotification(p.title || appTitle, p.body || "");
 });
 
+ipcMain.handle("link:open-external", async (_event, value) => {
+  const url = normalizeTabUrl(value);
+  if (!url) return false;
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    title: "打开链接",
+    message: "是否使用默认浏览器打开以下链接？",
+    detail: url,
+    buttons: ["使用默认浏览器打开", "关闭"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (result.response !== 0) return false;
+  await shell.openExternal(url);
+  return true;
+});
+
 ipcMain.handle("autostart:get", () => getAutoStartStatus());
 ipcMain.handle("autostart:set", (_event, enabled) => setAutoStart(enabled));
 ipcMain.handle("settings:get", () => loadAppSettings());
