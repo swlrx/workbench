@@ -690,18 +690,29 @@ function isAllowedMediaCheck(permission, details = {}) {
 }
 
 function showContentContextMenu(view, params) {
+  // Windows 原生菜单支持按标签字母选择。若在菜单尚未完全关闭时立即刷新，
+  // 用于选择“重新加载”的 L 键可能落到新页面当前输入框中。记录刷新操作，
+  // 等 menu.popup 的关闭回调执行后再刷新，避免该按键穿透到渲染页。
+  let pendingReload = null;
   const menu = Menu.buildFromTemplate([
     { label: "后退", enabled: view.webContents.canGoBack(), click: () => view.webContents.goBack() },
     { label: "前进", enabled: view.webContents.canGoForward(), click: () => view.webContents.goForward() },
     { type: "separator" },
-    { label: "重新加载", click: () => view.webContents.reload() },
-    { label: "强制重新加载", click: () => view.webContents.reloadIgnoringCache() },
+    { label: "重新加载", click: () => { pendingReload = false; } },
+    { label: "强制重新加载", click: () => { pendingReload = true; } },
     { type: "separator" },
     { role: "copy", label: "复制", enabled: Boolean(params.selectionText) },
     { role: "paste", label: "粘贴", enabled: params.isEditable },
     { label: "在浏览器中打开", click: () => shell.openExternal(view.webContents.getURL()) }
   ]);
-  menu.popup({ window: mainWindow });
+  menu.popup({
+    window: mainWindow,
+    callback: () => setTimeout(() => {
+      if (pendingReload === null || view.webContents.isDestroyed()) return;
+      if (pendingReload) view.webContents.reloadIgnoringCache();
+      else view.webContents.reload();
+    }, 0)
+  });
 }
 
 function loadTabState() {
