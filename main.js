@@ -1088,9 +1088,12 @@ function openUrlShortcut(url) {
 function attachViewInputShortcuts(webContents) {
   webContents.on("before-input-event", (event, input) => {
     const suppressUntil = suppressedReloadKeys.get(webContents) || 0;
-    if (Date.now() < suppressUntil && input.type === "keyDown" && !input.control && !input.alt && !input.meta && String(input.key || "").toLowerCase() === "l") {
-      suppressedReloadKeys.delete(webContents);
+    if (Date.now() < suppressUntil && !input.control && !input.alt && !input.meta && String(input.key || "").toLowerCase() === "l") {
+      // Windows 会为同一次残留输入依次发送 keyDown、char、keyUp。真正写入
+      // 输入框的是 char；上一版在 keyDown 时删除抑制状态，导致随后 char 仍
+      // 被页面接收。三个阶段必须全部拦截，等 keyUp 后再解除。
       event.preventDefault();
+      if (input.type === "keyUp") suppressedReloadKeys.delete(webContents);
       return;
     }
     if (suppressUntil && Date.now() >= suppressUntil) suppressedReloadKeys.delete(webContents);
