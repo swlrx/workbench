@@ -26,6 +26,10 @@ let updateCheckRunning = false;
 let updateDownloadRunning = false;
 let updateReadyToInstall = false;
 let updateCheckInteractive = false;
+let updateProgressWindow = null;
+let updateDownloadVersion = "";
+let updateProgress = { percent: 0, transferred: 0, total: 0, bytesPerSecond: 0 };
+const suppressedReloadKeys = new WeakMap();
 
 const DEFAULT_URL_SHORTCUTS = ["F1", "F2", "F3", "F4"];
 const RESERVED_SHORTCUTS = new Map([
@@ -558,6 +562,7 @@ function setupApplicationMenu() {
       submenu: [
         { label: `当前版本 ${app.getVersion()}`, enabled: false },
         { label: updateReadyToInstall ? "安装已下载的更新" : "检查更新...", click: () => updateReadyToInstall ? autoUpdater.quitAndInstall(false, true) : checkForUpdates(true) },
+        ...(updateDownloadRunning ? [{ label: "显示更新下载进度", click: showUpdateProgressWindow }] : []),
         {
           label: "关于工作台",
           click: () => dialog.showMessageBox(mainWindow, {
@@ -579,6 +584,48 @@ function updateErrorMessage(error) {
   return String(error?.message || error || "未知错误").slice(0, 1000);
 }
 
+function updateProgressPayload() {
+  return { version: updateDownloadVersion, ...updateProgress };
+}
+
+function sendUpdateProgress() {
+  if (!updateProgressWindow || updateProgressWindow.isDestroyed()) return;
+  updateProgressWindow.webContents.send("update:progress", updateProgressPayload());
+}
+
+function showUpdateProgressWindow() {
+  if (!updateProgressWindow || updateProgressWindow.isDestroyed()) {
+    updateProgressWindow = new BrowserWindow({
+      width: 520,
+      height: 230,
+      resizable: false,
+      maximizable: false,
+      minimizable: true,
+      show: false,
+      parent: mainWindow,
+      icon: iconPath,
+      title: "正在下载更新",
+      webPreferences: { nodeIntegration: true, contextIsolation: false }
+    });
+    updateProgressWindow.setMenu(null);
+    updateProgressWindow.loadFile(path.join(__dirname, "update-progress.html"));
+    updateProgressWindow.webContents.on("did-finish-load", sendUpdateProgress);
+    updateProgressWindow.on("close", event => {
+      if (!updateDownloadRunning) return;
+      event.preventDefault();
+      updateProgressWindow.hide();
+    });
+    updateProgressWindow.on("closed", () => { updateProgressWindow = null; });
+  }
+  updateProgressWindow.show();
+  updateProgressWindow.focus();
+  sendUpdateProgress();
+}
+
+ipcMain.on("update:hide-progress", () => {
+  if (updateProgressWindow && !updateProgressWindow.isDestroyed()) updateProgressWindow.hide();
+});
+
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -598,10 +645,16 @@ function setupAutoUpdater() {
     });
     if (result.response !== 0 || updateDownloadRunning) return;
     updateDownloadRunning = true;
+    updateDownloadVersion = String(info.version || "");
+    updateProgress = { percent: 0, transferred: 0, total: 0, bytesPerSecond: 0 };
+    setupApplicationMenu();
+    showUpdateProgressWindow();
     try {
       await autoUpdater.downloadUpdate();
     } catch (error) {
       updateDownloadRunning = false;
+      setupApplicationMenu();
+      if (updateProgressWindow && !updateProgressWindow.isDestroyed()) updateProgressWindow.close();
       dialog.showErrorBox("更新下载失败", updateErrorMessage(error));
     }
   });
@@ -618,13 +671,21 @@ function setupAutoUpdater() {
   autoUpdater.on("download-progress", progress => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+    updateProgress = {
+      percent,
+      transferred: Number(progress.transferred) || 0,
+      total: Number(progress.total) || 0,
+      bytesPerSecond: Number(progress.bytesPerSecond) || 0
+    };
     mainWindow.setProgressBar(percent / 100);
+    sendUpdateProgress();
   });
 
   autoUpdater.on("update-downloaded", async info => {
     updateDownloadRunning = false;
     updateReadyToInstall = true;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    if (updateProgressWindow && !updateProgressWindow.isDestroyed()) updateProgressWindow.close();
     setupApplicationMenu();
     const result = await dialog.showMessageBox(mainWindow, {
       type: "info",
@@ -646,6 +707,8 @@ function setupAutoUpdater() {
     updateDownloadRunning = false;
     updateCheckInteractive = false;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    if (updateProgressWindow && !updateProgressWindow.isDestroyed()) updateProgressWindow.close();
+    setupApplicationMenu();
     if (wasActive && shouldNotify) dialog.showErrorBox("检查更新失败", updateErrorMessage(error));
   });
 }
@@ -690,16 +753,22 @@ function isAllowedMediaCheck(permission, details = {}) {
 }
 
 function showContentContextMenu(view, params) {
-  // Windows 原生菜单支持按标签字母选择。若在菜单尚未完全关闭时立即刷新，
-  // 用于选择“重新加载”的 L 键可能落到新页面当前输入框中。记录刷新操作，
-  // 等 menu.popup 的关闭回调执行后再刷新，避免该按键穿透到渲染页。
+  // Windows 原生菜单的键盘助记符可能在菜单关闭后继续送入页面。右键菜单
+  // 不需要字母助记符，因此显式指定不会输入文本的快捷键，避免“重新加载”
+  // 被系统分配 L 后落进页面输入框。
   let pendingReload = null;
+  const requestReload = ignoreCache => {
+    pendingReload = ignoreCache;
+    // 必须从菜单项 click 阶段开始拦截；若等菜单关闭后再启用，残留按键可能
+    // 已经排入渲染进程的输入队列。
+    suppressedReloadKeys.set(view.webContents, Date.now() + 3000);
+  };
   const menu = Menu.buildFromTemplate([
-    { label: "后退", enabled: view.webContents.canGoBack(), click: () => view.webContents.goBack() },
-    { label: "前进", enabled: view.webContents.canGoForward(), click: () => view.webContents.goForward() },
+    { label: "后退", accelerator: "Alt+Left", acceleratorWorksWhenHidden: false, enabled: view.webContents.canGoBack(), click: () => view.webContents.goBack() },
+    { label: "前进", accelerator: "Alt+Right", acceleratorWorksWhenHidden: false, enabled: view.webContents.canGoForward(), click: () => view.webContents.goForward() },
     { type: "separator" },
-    { label: "重新加载", click: () => { pendingReload = false; } },
-    { label: "强制重新加载", click: () => { pendingReload = true; } },
+    { label: "重新加载", accelerator: "F5", acceleratorWorksWhenHidden: false, click: () => requestReload(false) },
+    { label: "强制重新加载", accelerator: "Ctrl+F5", acceleratorWorksWhenHidden: false, click: () => requestReload(true) },
     { type: "separator" },
     { role: "copy", label: "复制", enabled: Boolean(params.selectionText) },
     { role: "paste", label: "粘贴", enabled: params.isEditable },
@@ -1018,6 +1087,13 @@ function openUrlShortcut(url) {
 
 function attachViewInputShortcuts(webContents) {
   webContents.on("before-input-event", (event, input) => {
+    const suppressUntil = suppressedReloadKeys.get(webContents) || 0;
+    if (Date.now() < suppressUntil && input.type === "keyDown" && !input.control && !input.alt && !input.meta && String(input.key || "").toLowerCase() === "l") {
+      suppressedReloadKeys.delete(webContents);
+      event.preventDefault();
+      return;
+    }
+    if (suppressUntil && Date.now() >= suppressUntil) suppressedReloadKeys.delete(webContents);
     if (input.type !== "keyDown") return;
     const shortcut = shortcutFromInput(input);
     if (!shortcut) return;

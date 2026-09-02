@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "3.5.27",
+  "version": "3.5.28",
   "description": "工作台 Workbench - 多标签内网客户端",
   "main": "main.js",
   "author": "swlrx",
@@ -31,6 +31,7 @@
       "main.js",
       "preload.js",
       "renderer-injections.js",
+      "update-progress.html",
       "tabbar.html",
       "settings.html",
       "assets/**/*"
