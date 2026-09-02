@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>网址管理</title>
+<title>网址与快捷键管理</title>
 <style>
   * { box-sizing: border-box; }
   :root {
@@ -19,12 +19,14 @@
   h2 { margin: 0 0 8px; font-size: 20px; }
   .hint { color: var(--fg-dim); margin-bottom: 18px; }
   #list { border: 1px solid var(--row-border); border-radius: 8px; overflow: hidden; min-height: 260px; }
-  .row { display: grid; grid-template-columns: 36px minmax(220px, 1fr) minmax(120px, .55fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--row-border); }
+  .row { display: grid; grid-template-columns: 36px minmax(190px, 1fr) minmax(110px, .45fr) 150px auto; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--row-border); }
   .row:last-child { border-bottom: none; }
   .row.default { background: var(--row-default); }
   .index { color: var(--fg-dim); text-align: center; }
   input[type=text] { width: 100%; padding: 9px 10px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--input-bg); color: var(--fg); outline: none; }
   input[type=text]:focus { border-color: #4a90d9; }
+  input.shortcut { text-align: center; cursor: pointer; user-select: none; }
+  input.shortcut.recording { border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,.2); }
   button { border: 0; border-radius: 6px; padding: 8px 11px; background: var(--btn-bg); color: var(--fg); cursor: pointer; }
   button:hover { background: var(--btn-hover); }
   button.primary { background: var(--accent); color: #fff; }
@@ -37,8 +39,8 @@
 </style>
 </head>
 <body>
-<h2>网址管理</h2>
-<div class="hint">可设置网址和标签别名。别名留空时，标签页仍显示网页默认标题。可删除全部网址，删除后下次启动为空白状态。</div>
+<h2>网址与快捷键管理</h2>
+<div class="hint">可设置网址、标签别名和跳转快捷键。前四个网址默认使用 F1–F4；点击快捷键框后直接按下新组合，Backspace/Delete 可清空。保存时会检测重复及工作台/Windows 常见冲突。</div>
 <div id="list"></div>
 <div id="error"></div>
 <div class="footer">
@@ -52,7 +54,7 @@
 const { ipcRenderer } = require('electron');
 const list = document.getElementById('list');
 const errorEl = document.getElementById('error');
-let state = { urls: [], defaultUrl: '', aliases: {} };
+let state = { urls: [], defaultUrl: '', aliases: {}, shortcuts: {} };
 
 // 主题跟随主进程
 ipcRenderer.on('theme:update', (_e, theme) => {
@@ -91,6 +93,15 @@ function normalize(value) {
   } catch { return ''; }
 }
 
+function shortcutFromEvent(event) {
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return '';
+  let key = '';
+  if (/^F(?:[1-9]|1[0-2])$/i.test(event.key)) key = event.key.toUpperCase();
+  else if (/^[a-z0-9]$/i.test(event.key)) key = event.key.toUpperCase();
+  if (!key) return '';
+  return [event.ctrlKey ? 'Ctrl' : '', event.altKey ? 'Alt' : '', event.shiftKey ? 'Shift' : '', event.metaKey ? 'Meta' : '', key].filter(Boolean).join('+');
+}
+
 function render() {
   list.innerHTML = '';
   state.urls.forEach((url, index) => {
@@ -100,6 +111,7 @@ function render() {
       <div class="index">${index + 1}</div>
       <input class="url" type="text" title="网址" value="${url.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" />
       <input class="alias" type="text" maxlength="100" title="标签别名" placeholder="别名（可选）" value="${String(state.aliases[url] || '').replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" />
+      <input class="shortcut" type="text" title="点击后按快捷键" placeholder="未设置" readonly value="${String(state.shortcuts[url] || '').replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" />
       <div class="actions">
         <button data-action="default" ${url === state.defaultUrl ? 'disabled' : ''}>设为默认</button>
         <button data-action="up" ${index === 0 ? 'disabled' : ''}>上移</button>
@@ -117,6 +129,10 @@ function render() {
         state.aliases[updated] = state.aliases[old];
         delete state.aliases[old];
       }
+      if (state.shortcuts[old]) {
+        state.shortcuts[updated] = state.shortcuts[old];
+        delete state.shortcuts[old];
+      }
       errorEl.textContent = '';
       render();
     });
@@ -124,6 +140,31 @@ function render() {
       const alias = event.target.value.trim();
       if (alias) state.aliases[state.urls[index]] = alias;
       else delete state.aliases[state.urls[index]];
+    });
+    const shortcutInput = row.querySelector('.shortcut');
+    shortcutInput.addEventListener('focus', () => {
+      shortcutInput.classList.add('recording');
+      shortcutInput.placeholder = '请按快捷键…';
+    });
+    shortcutInput.addEventListener('blur', () => {
+      shortcutInput.classList.remove('recording');
+      shortcutInput.placeholder = '未设置';
+    });
+    shortcutInput.addEventListener('keydown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === 'Escape') { shortcutInput.blur(); return; }
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        state.shortcuts[state.urls[index]] = '';
+        shortcutInput.value = '';
+        errorEl.textContent = '';
+        return;
+      }
+      const shortcut = shortcutFromEvent(event);
+      if (!shortcut) return;
+      state.shortcuts[state.urls[index]] = shortcut;
+      shortcutInput.value = shortcut;
+      errorEl.textContent = '';
     });
     row.querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
       const action = button.dataset.action;
@@ -133,6 +174,7 @@ function render() {
       if (action === 'delete') {
         const removed = state.urls.splice(index, 1)[0];
         delete state.aliases[removed];
+        delete state.shortcuts[removed];
         if (state.defaultUrl === removed) state.defaultUrl = state.urls[0] || '';
       }
       render();
@@ -157,6 +199,9 @@ document.getElementById('save').addEventListener('click', async () => {
   state.urls = urls;
   if (!state.urls.includes(state.defaultUrl)) state.defaultUrl = state.urls[0] || '';
   try {
+    const validation = await ipcRenderer.invoke('shortcuts:validate', state);
+    if (!validation.valid) { errorEl.textContent = validation.errors.join('；'); return; }
+    if (validation.warnings.length > 0 && !window.confirm(validation.warnings.join('\n') + '\n\n仍要保存吗？')) return;
     await ipcRenderer.invoke('settings:save', state);
     window.close();
   } catch (error) {
@@ -165,7 +210,7 @@ document.getElementById('save').addEventListener('click', async () => {
 });
 
 ipcRenderer.invoke('settings:get').then(settings => {
-  state = { ...settings, urls: [...settings.urls], aliases: { ...(settings.aliases || {}) } };
+  state = { ...settings, urls: [...settings.urls], aliases: { ...(settings.aliases || {}) }, shortcuts: { ...(settings.shortcuts || {}) } };
   render();
 }).catch(error => { errorEl.textContent = error.message; });
 </script>

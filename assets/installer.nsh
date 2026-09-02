@@ -64,10 +64,10 @@ FunctionEnd
 !macro customInstall
   ; Always replace shortcuts during upgrades and point them at a
   ; versioned ICO so Windows cannot reuse a stale shortcut icon cache.
-  File /oname=workbench-v364.ico "${BUILD_RESOURCES_DIR}\hermes.ico"
+  File /oname=workbench-v3523.ico "${BUILD_RESOURCES_DIR}\hermes.ico"
 
   Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
-  CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$appExe" "" "$INSTDIR\workbench-v364.ico" 0 "" "" "${APP_DESCRIPTION}"
+  CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$appExe" "" "$INSTDIR\workbench-v3523.ico" 0 "" "" "${APP_DESCRIPTION}"
   ClearErrors
   WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
 
@@ -75,7 +75,7 @@ FunctionEnd
     CreateDirectory "$SMPROGRAMS\${MENU_FILENAME}"
   !endif
   Delete "$newStartMenuLink"
-  CreateShortCut "$newStartMenuLink" "$appExe" "" "$INSTDIR\workbench-v364.ico" 0 "" "" "${APP_DESCRIPTION}"
+  CreateShortCut "$newStartMenuLink" "$appExe" "" "$INSTDIR\workbench-v3523.ico" 0 "" "" "${APP_DESCRIPTION}"
   ClearErrors
   WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
 
@@ -112,6 +112,7 @@ FunctionEnd
   Delete "$INSTDIR\workbench-v361.ico"
   Delete "$INSTDIR\workbench-v362.ico"
   Delete "$INSTDIR\workbench-v363.ico"
+  Delete "$INSTDIR\workbench-v364.ico"
 
   ; Notify shell to refresh icons
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'

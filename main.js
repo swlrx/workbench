@@ -22,6 +22,24 @@ let sessionDataFlushed = false;
 let settingsWindow = null;
 let currentTheme = "dark";
 
+const DEFAULT_URL_SHORTCUTS = ["F1", "F2", "F3", "F4"];
+const RESERVED_SHORTCUTS = new Map([
+  ["F5", "工作台使用 F5 刷新当前页面"],
+  ["Ctrl+F5", "工作台使用 Ctrl+F5 强制刷新当前页面"],
+  ["Shift+F5", "工作台使用 Shift+F5 强制刷新当前页面"],
+  ["Ctrl+T", "工作台使用 Ctrl+T 新建标签页"],
+  ["Ctrl+Shift+R", "工作台使用 Ctrl+Shift+R 强制刷新"],
+  ["Alt+F4", "Windows 使用 Alt+F4 关闭窗口"],
+  ["F10", "Windows/Electron 使用 F10 激活菜单栏"],
+  ["F11", "浏览器通常使用 F11 切换全屏"],
+  ["F12", "浏览器通常使用 F12 打开开发者工具"]
+]);
+const SHORTCUT_WARNINGS = new Map([
+  ["F1", "F1 通常用于帮助；保存后将优先跳转网页"],
+  ["F3", "F3 通常用于查找下一个；保存后将优先跳转网页"],
+  ["F4", "F4 在部分网页中有自定义用途；保存后将优先跳转网页"]
+]);
+
 if (process.platform === "win32") {
   app.setAppUserModelId(appId);
 }
@@ -165,6 +183,60 @@ function normalizeTabAlias(value) {
   return String(value || "").trim().slice(0, 100);
 }
 
+function normalizeShortcut(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const aliases = { CONTROL: "Ctrl", CTRL: "Ctrl", ALT: "Alt", SHIFT: "Shift", META: "Meta", CMD: "Meta", COMMAND: "Meta" };
+  const modifiers = new Set();
+  let key = "";
+  for (const rawPart of text.split("+").map(part => part.trim()).filter(Boolean)) {
+    const upper = rawPart.toUpperCase();
+    if (aliases[upper]) { modifiers.add(aliases[upper]); continue; }
+    if (key) return "";
+    if (/^F(?:[1-9]|1[0-2])$/.test(upper)) key = upper;
+    else if (/^[A-Z0-9]$/.test(upper)) key = upper;
+    else return "";
+  }
+  if (!key) return "";
+  return ["Ctrl", "Alt", "Shift", "Meta"].filter(item => modifiers.has(item)).concat(key).join("+");
+}
+
+function shortcutFromInput(input) {
+  const keyName = String(input.key || "");
+  if (["Control", "Alt", "Shift", "Meta"].includes(keyName)) return "";
+  const key = /^F(?:[1-9]|1[0-2])$/i.test(keyName) ? keyName.toUpperCase() : (/^[a-z0-9]$/i.test(keyName) ? keyName.toUpperCase() : "");
+  if (!key) return "";
+  return normalizeShortcut([input.control ? "Ctrl" : "", input.alt ? "Alt" : "", input.shift ? "Shift" : "", input.meta ? "Meta" : "", key].filter(Boolean).join("+"));
+}
+
+function normalizeUrlShortcuts(urls, shortcuts) {
+  const clean = {};
+  const source = shortcuts && typeof shortcuts === "object" && !Array.isArray(shortcuts) ? shortcuts : {};
+  urls.forEach((url, index) => {
+    const configured = Object.prototype.hasOwnProperty.call(source, url) ? source[url] : (DEFAULT_URL_SHORTCUTS[index] || "");
+    const shortcut = normalizeShortcut(configured);
+    if (shortcut) clean[url] = shortcut;
+  });
+  return clean;
+}
+
+function validateUrlShortcuts(urls, shortcuts) {
+  const errors = [];
+  const warnings = [];
+  const owners = new Map();
+  for (const url of urls) {
+    const raw = shortcuts?.[url];
+    if (!raw) continue;
+    const shortcut = normalizeShortcut(raw);
+    if (!shortcut) { errors.push(`${url} 的快捷键格式不正确`); continue; }
+    if (RESERVED_SHORTCUTS.has(shortcut)) errors.push(`${shortcut}：${RESERVED_SHORTCUTS.get(shortcut)}`);
+    if (owners.has(shortcut)) errors.push(`${shortcut} 同时分配给了两个网址`);
+    else owners.set(shortcut, url);
+    if (SHORTCUT_WARNINGS.has(shortcut)) warnings.push(`${shortcut}：${SHORTCUT_WARNINGS.get(shortcut)}`);
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}
+
 function getAliasForUrl(url, settings = loadAppSettings()) {
   const normalizedUrl = normalizeTabUrl(url);
   return normalizedUrl ? normalizeTabAlias(settings.aliases?.[normalizedUrl]) : "";
@@ -201,7 +273,8 @@ function migrateLegacyTabSettings() {
       camera: false,
       defaultUrl: urls[activeIndex],
       urls,
-      aliases: {}
+      aliases: {},
+      shortcuts: normalizeUrlShortcuts(urls, {})
     };
     fs.writeFileSync(settingsPath, JSON.stringify(migrated, null, 2), "utf8");
     console.log(`Migrated ${urls.length} URL(s) from tabs.json to settings.json`);
@@ -214,7 +287,7 @@ function migrateLegacyTabSettings() {
 
 function loadAppSettings() {
   // 无历史配置时只生成空模板；首次打开由用户在“+”中新建网址。
-  const fallback = { microphone: true, camera: false, defaultUrl: "", urls: [], aliases: {}, theme: "dark" };
+  const fallback = { microphone: true, camera: false, defaultUrl: "", urls: [], aliases: {}, shortcuts: {}, theme: "dark" };
   migrateLegacyTabSettings();
   try {
     const state = JSON.parse(fs.readFileSync(getAppSettingsPath(), "utf8"));
@@ -235,6 +308,7 @@ function loadAppSettings() {
       defaultUrl: requestedDefault && urls.includes(requestedDefault) ? requestedDefault : urls[0] || "",
       urls,
       aliases,
+      shortcuts: normalizeUrlShortcuts(urls, state.shortcuts),
       theme: state.theme === "light" ? "light" : "dark"
     };
   } catch {
@@ -262,6 +336,7 @@ function saveAppSettings(settings) {
       defaultUrl: "",
       urls: [],
       aliases: {},
+      shortcuts: {},
       theme: settings.theme === "light" ? "light" : "dark"
     };
     fs.writeFileSync(getAppSettingsPath(), JSON.stringify(empty, null, 2), "utf8");
@@ -277,6 +352,9 @@ function saveAppSettings(settings) {
       if (alias) aliases[url] = alias;
     }
   }
+  const shortcutValidation = validateUrlShortcuts(urls, settings.shortcuts || {});
+  if (!shortcutValidation.valid) throw new Error(shortcutValidation.errors.join("；"));
+  const shortcuts = normalizeUrlShortcuts(urls, settings.shortcuts);
   const clean = {
     version: 2,
     microphone: settings.microphone !== false,
@@ -284,6 +362,7 @@ function saveAppSettings(settings) {
     defaultUrl: requestedDefault && urls.includes(requestedDefault) ? requestedDefault : urls[0],
     urls,
     aliases,
+    shortcuts,
     theme: settings.theme === "light" ? "light" : "dark"
   };
   fs.writeFileSync(getAppSettingsPath(), JSON.stringify(clean, null, 2), "utf8");
@@ -346,10 +425,10 @@ function showUrlManager() {
   settingsWindow = new BrowserWindow({
     parent: mainWindow,
     modal: true,
-    title: "网址管理",
-    width: 760,
+    title: "网址与快捷键管理",
+    width: 1080,
     height: 560,
-    minWidth: 650,
+    minWidth: 900,
     minHeight: 480,
     autoHideMenuBar: true,
     icon: iconPath,
@@ -466,7 +545,7 @@ function setupApplicationMenu() {
           click: () => newTab(url)
         })),
         { type: "separator" },
-        { label: "管理网址...", click: showUrlManager }
+        { label: "管理网址与快捷键...", click: showUrlManager }
       ]
     },
     {
@@ -711,6 +790,10 @@ ipcMain.handle("autostart:get", () => getAutoStartStatus());
 ipcMain.handle("autostart:set", (_event, enabled) => setAutoStart(enabled));
 ipcMain.handle("settings:get", () => loadAppSettings());
 ipcMain.handle("settings:save", (_event, settings) => saveAppSettings(settings || {}));
+ipcMain.handle("shortcuts:validate", (_event, settings) => {
+  const urls = Array.isArray(settings?.urls) ? settings.urls.map(normalizeTabUrl).filter(Boolean) : [];
+  return validateUrlShortcuts(urls, settings?.shortcuts || {});
+});
 
 // Tab IPC
 ipcMain.on("tab:new", (_event, url) => newTab(url));
@@ -793,12 +876,30 @@ function setupDownloadHandling() {
   });
 }
 
+function openUrlShortcut(url) {
+  const normalizedUrl = normalizeTabUrl(url);
+  if (!normalizedUrl) return;
+  const existing = views.find(entry => normalizeTabUrl(entry.sourceUrl) === normalizedUrl || normalizeTabUrl(entry.url) === normalizedUrl);
+  if (existing) switchTab(existing.id);
+  else newTab(normalizedUrl);
+}
+
 function attachViewInputShortcuts(webContents) {
   webContents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || input.key !== "F5") return;
+    if (input.type !== "keyDown") return;
+    const shortcut = shortcutFromInput(input);
+    if (!shortcut) return;
+    if (["F5", "Ctrl+F5", "Shift+F5", "Ctrl+Shift+R"].includes(shortcut)) {
+      event.preventDefault();
+      if (shortcut !== "F5") webContents.reloadIgnoringCache();
+      else webContents.reload();
+      return;
+    }
+    const settings = loadAppSettings();
+    const target = settings.urls.find(url => settings.shortcuts?.[url] === shortcut);
+    if (!target) return;
     event.preventDefault();
-    if (input.shift || input.control || input.meta) webContents.reloadIgnoringCache();
-    else webContents.reload();
+    if (!input.isAutoRepeat) openUrlShortcut(target);
   });
 }
 
