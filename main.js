@@ -29,7 +29,6 @@ let updateCheckInteractive = false;
 let updateProgressWindow = null;
 let updateDownloadVersion = "";
 let updateProgress = { percent: 0, transferred: 0, total: 0, bytesPerSecond: 0 };
-const suppressedReloadKeys = new WeakMap();
 
 const DEFAULT_URL_SHORTCUTS = ["F1", "F2", "F3", "F4"];
 const RESERVED_SHORTCUTS = new Map([
@@ -753,35 +752,18 @@ function isAllowedMediaCheck(permission, details = {}) {
 }
 
 function showContentContextMenu(view, params) {
-  // Windows 原生菜单的键盘助记符可能在菜单关闭后继续送入页面。右键菜单
-  // 不需要字母助记符，因此显式指定不会输入文本的快捷键，避免“重新加载”
-  // 被系统分配 L 后落进页面输入框。
-  let pendingReload = null;
-  const requestReload = ignoreCache => {
-    pendingReload = ignoreCache;
-    // 必须从菜单项 click 阶段开始拦截；若等菜单关闭后再启用，残留按键可能
-    // 已经排入渲染进程的输入队列。
-    suppressedReloadKeys.set(view.webContents, Date.now() + 3000);
-  };
   const menu = Menu.buildFromTemplate([
-    { label: "后退", accelerator: "Alt+Left", acceleratorWorksWhenHidden: false, enabled: view.webContents.canGoBack(), click: () => view.webContents.goBack() },
-    { label: "前进", accelerator: "Alt+Right", acceleratorWorksWhenHidden: false, enabled: view.webContents.canGoForward(), click: () => view.webContents.goForward() },
+    { label: "后退", enabled: view.webContents.canGoBack(), click: () => view.webContents.goBack() },
+    { label: "前进", enabled: view.webContents.canGoForward(), click: () => view.webContents.goForward() },
     { type: "separator" },
-    { label: "重新加载", accelerator: "F5", acceleratorWorksWhenHidden: false, click: () => requestReload(false) },
-    { label: "强制重新加载", accelerator: "Ctrl+F5", acceleratorWorksWhenHidden: false, click: () => requestReload(true) },
+    { label: "重新加载", click: () => view.webContents.reload() },
+    { label: "强制重新加载", click: () => view.webContents.reloadIgnoringCache() },
     { type: "separator" },
     { role: "copy", label: "复制", enabled: Boolean(params.selectionText) },
     { role: "paste", label: "粘贴", enabled: params.isEditable },
     { label: "在浏览器中打开", click: () => shell.openExternal(view.webContents.getURL()) }
   ]);
-  menu.popup({
-    window: mainWindow,
-    callback: () => setTimeout(() => {
-      if (pendingReload === null || view.webContents.isDestroyed()) return;
-      if (pendingReload) view.webContents.reloadIgnoringCache();
-      else view.webContents.reload();
-    }, 0)
-  });
+  menu.popup({ window: mainWindow });
 }
 
 function loadTabState() {
@@ -1087,16 +1069,6 @@ function openUrlShortcut(url) {
 
 function attachViewInputShortcuts(webContents) {
   webContents.on("before-input-event", (event, input) => {
-    const suppressUntil = suppressedReloadKeys.get(webContents) || 0;
-    if (Date.now() < suppressUntil && !input.control && !input.alt && !input.meta && String(input.key || "").toLowerCase() === "l") {
-      // Windows 会为同一次残留输入依次发送 keyDown、char、keyUp。真正写入
-      // 输入框的是 char；上一版在 keyDown 时删除抑制状态，导致随后 char 仍
-      // 被页面接收。三个阶段必须全部拦截，等 keyUp 后再解除。
-      event.preventDefault();
-      if (input.type === "keyUp") suppressedReloadKeys.delete(webContents);
-      return;
-    }
-    if (suppressUntil && Date.now() >= suppressUntil) suppressedReloadKeys.delete(webContents);
     if (input.type !== "keyDown") return;
     const shortcut = shortcutFromInput(input);
     if (!shortcut) return;
