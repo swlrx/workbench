@@ -596,6 +596,7 @@ function showContentContextMenu(view, params) {
     { label: "强制重新加载", click: () => view.webContents.reloadIgnoringCache() },
     { type: "separator" },
     { role: "copy", label: "复制", enabled: Boolean(params.selectionText) },
+    { role: "paste", label: "粘贴", enabled: params.isEditable },
     { label: "在浏览器中打开", click: () => shell.openExternal(view.webContents.getURL()) }
   ]);
   menu.popup({ window: mainWindow });

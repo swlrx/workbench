@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "3.5.23",
+  "version": "3.5.24",
   "description": "工作台 Workbench - 多标签内网客户端",
   "main": "main.js",
   "author": "swlrx",
