@@ -597,8 +597,8 @@ function sendUpdateProgress() {
 function showUpdateProgressWindow() {
   if (!updateProgressWindow || updateProgressWindow.isDestroyed()) {
     updateProgressWindow = new BrowserWindow({
-      width: 520,
-      height: 230,
+      width: 580,
+      height: 270,
       resizable: false,
       maximizable: false,
       minimizable: true,
