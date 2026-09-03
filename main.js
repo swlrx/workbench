@@ -32,8 +32,6 @@ let updateProgress = { percent: 0, transferred: 0, total: 0, bytesPerSecond: 0 }
 
 const DEFAULT_URL_SHORTCUTS = ["F1", "F2", "F3", "F4"];
 const RESERVED_SHORTCUTS = new Map([
-  ["Ctrl+C", "工作台使用 Ctrl+C 复制"],
-  ["Ctrl+V", "工作台使用 Ctrl+V 粘贴"],
   ["F5", "工作台使用 F5 刷新当前页面"],
   ["Ctrl+F5", "工作台使用 Ctrl+F5 强制刷新当前页面"],
   ["Shift+F5", "工作台使用 Shift+F5 强制刷新当前页面"],
@@ -1078,14 +1076,6 @@ function attachViewInputShortcuts(webContents) {
     if (input.type !== "keyDown") return;
     const shortcut = shortcutFromInput(input);
     if (!shortcut) return;
-    if (shortcut === "Ctrl+C" || shortcut === "Ctrl+V") {
-      event.preventDefault();
-      if (!input.isAutoRepeat) {
-        if (shortcut === "Ctrl+C") webContents.copy();
-        else webContents.paste();
-      }
-      return;
-    }
     if (["F5", "Ctrl+F5", "Shift+F5", "Ctrl+Shift+R"].includes(shortcut)) {
       event.preventDefault();
       if (shortcut !== "F5") webContents.reloadIgnoringCache();
