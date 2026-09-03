@@ -630,6 +630,10 @@ ipcMain.on("update:hide-progress", () => {
 function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  // NSIS 差分更新会先下载 blockmap/差分块；本机缺少可复用的旧安装包或
+  // 差分校验失败时，electron-updater 会再回退下载完整安装包，进度因此像
+  // “下载了两次”。工作台安装包较小，直接单次完整下载更稳定且进度连续。
+  autoUpdater.disableDifferentialDownload = true;
 
   autoUpdater.on("update-available", async info => {
     updateCheckRunning = false;
